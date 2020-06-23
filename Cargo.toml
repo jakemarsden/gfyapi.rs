@@ -11,3 +11,11 @@ edition = "2018"
 [lib]
 name = "gfycat_client"
 path = "src/lib.rs"
+
+[dependencies]
+num-derive = "0.3"
+num-traits = "0.2.12"
+reqwest = { version = "0.10.6", features = ["blocking", "json"] }
+serde = { version = "1.0.114", features = ["derive"] }
+serde_repr = "0.1.6"
+tokio = { version = "0.2.21", features = ["macros", "rt-threaded"] }
