@@ -1,0 +1,13 @@
+[package]
+name = "gfycat-client"
+version = "0.0.1"
+authors = ["Jake Marsden <jakemarsdenjm@gmail.com>"]
+repository = "https://github.com/jakemarsden/gfycat-client.rs"
+readme = "README.md"
+license = "MIT"
+publish = false
+edition = "2018"
+
+[lib]
+name = "gfycat_client"
+path = "src/lib.rs"
