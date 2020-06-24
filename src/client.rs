@@ -1,109 +1,14 @@
-use chrono::serde::ts_seconds;
-use chrono::{DateTime, Utc};
-use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::{FromPrimitive, ToPrimitive};
+use crate::dto::*;
+use crate::error::Error;
+use crate::result::Result;
 use reqwest::header::CONTENT_TYPE;
-use reqwest::StatusCode;
-use serde::de::{DeserializeOwned, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::cmp::PartialEq;
-use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
+use serde::de::DeserializeOwned;
 
 #[derive(Clone, Debug)]
 pub struct Client {
     http_client: reqwest::Client,
     api_domain: String,
     api_version: u32,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Item {
-    avg_color: String,
-    #[serde(rename = "content_urls")]
-    content_urls: HashMap<String, ItemContent>,
-    #[serde(with = "ts_seconds")]
-    create_date: DateTime<Utc>,
-    description: String,
-    frame_rate: f32,
-    gfy_id: String,
-    gfy_name: String,
-    #[serde(with = "wrapped_with_str")]
-    gfy_number: u64,
-    gfy_slug: String,
-    has_audio: bool,
-    has_transparency: bool,
-    height: u32,
-    language_categories: Vec<String>,
-    language_text: String,
-    md5: String,
-    nsfw: Nsfw,
-    num_frames: f32,
-    published: Published,
-    sitename: String,
-    tags: Vec<String>,
-    title: String,
-    user_data: User,
-    width: u32,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ItemContent {
-    height: u32,
-    size: u64,
-    url: String, // TODO: store as a url::Url ?
-    width: u32,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct User {
-    name: String,
-    profile_image_url: String, // TODO: store as a url::Url ?
-    url: String,               // TODO: store as a url::Url ?
-    username: String,
-    verified: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-struct ItemWrapper {
-    gfy_item: Item,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ErrorResponse {
-    error_message: String,
-}
-
-#[derive(Serialize_repr, Deserialize_repr, PartialEq, Copy, Clone, Debug)]
-#[repr(u8)]
-pub enum Published {
-    No = 0,
-    Yes = 1,
-}
-
-#[derive(ToPrimitive, FromPrimitive, PartialEq, Copy, Clone, Debug)]
-#[repr(u8)]
-pub enum Nsfw {
-    Clean = 0,
-    Adult = 1,
-    PotentiallyOffensive = 3,
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Debug)]
-pub enum Error {
-    Initialization(reqwest::Error),
-    Connect(reqwest::Error),
-    UnparsableResponseBody(reqwest::Error, Option<String>),
-    HttpClientError(StatusCode, ErrorResponse),
-    HttpServerError(StatusCode),
 }
 
 impl Client {
@@ -205,94 +110,6 @@ impl Client {
             Ok(res_obj) => Ok(res_obj),
             Err(err) => Err(Error::UnparsableResponseBody(err, content_type)),
         }
-    }
-}
-
-impl Serialize for Nsfw {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // TODO: `unimplemented!()` is not error handling!
-        //   e.g. make this work: `.ok_or(S::Error::custom(format!("{}", self)))?.to_string()`
-        let str_value = self.to_u8().ok_or_else(|| unimplemented!())?.to_string();
-        serializer.serialize_str(str_value.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for Nsfw {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Nsfw, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct NsfwVisitor;
-
-        impl<'de> Visitor<'de> for NsfwVisitor {
-            type Value = Nsfw;
-
-            fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-                formatter.write_str("a stringify-ed integer")
-            }
-
-            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                use serde::de::Error;
-
-                let u8_value = value.parse::<u8>().map_err(Error::custom)?;
-                Self::Value::from_u8(u8_value)
-                    // TODO: nice error message
-                    .ok_or_else(|| Error::custom("TODO: nice error message"))
-            }
-        }
-
-        deserializer.deserialize_str(NsfwVisitor)
-    }
-}
-
-mod wrapped_with_str {
-    use serde::de::Error;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use std::fmt::Display;
-    use std::result::Result;
-    use std::str::FromStr;
-
-    pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        T: ToString,
-        S: Serializer,
-    {
-        let str = value.to_string();
-        String::serialize(&str, serializer)
-    }
-
-    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-    where
-        T: FromStr,
-        T::Err: Display,
-        D: Deserializer<'de>,
-    {
-        let str = String::deserialize(deserializer)?;
-        T::from_str(&str).map_err(Error::custom)
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(match self {
-            Error::Initialization(err) => err,
-            Error::Connect(err) => err,
-            Error::UnparsableResponseBody(err, _) => err,
-            Error::HttpClientError(_, _) => return None,
-            Error::HttpServerError(_) => return None,
-        })
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        write!(formatter, "{:?}", self)
     }
 }
 
