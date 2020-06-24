@@ -1,15 +1,15 @@
 [package]
-name = "gfycat-client"
+name = "gfyapi"
 version = "0.0.1"
 authors = ["Jake Marsden <jakemarsdenjm@gmail.com>"]
-repository = "https://github.com/jakemarsden/gfycat-client.rs"
+repository = "https://github.com/jakemarsden/gfyapi.rs"
 readme = "README.md"
 license = "MIT"
 publish = false
 edition = "2018"
 
 [lib]
-name = "gfycat_client"
+name = "gfyapi"
 path = "src/lib.rs"
 
 [dependencies]

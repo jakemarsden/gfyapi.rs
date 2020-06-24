@@ -1,1 +1,1 @@
-# gfycat-client.rs
+# Gfycat API wrapper for Rust
