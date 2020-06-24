@@ -2,7 +2,9 @@ use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
-use serde::de::Visitor;
+use reqwest::header::CONTENT_TYPE;
+use reqwest::StatusCode;
+use serde::de::{DeserializeOwned, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::cmp::PartialEq;
@@ -72,6 +74,12 @@ struct ItemWrapper {
     gfy_item: Item,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorResponse {
+    error_message: String,
+}
+
 #[derive(Serialize_repr, Deserialize_repr, PartialEq, Copy, Clone, Debug)]
 #[repr(u8)]
 pub enum Published {
@@ -93,8 +101,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     Initialization(reqwest::Error),
     Connect(reqwest::Error),
-    HttpNotOk(reqwest::StatusCode),
-    BadResponse(reqwest::Error),
+    UnparsableResponseBody(reqwest::Error, Option<String>),
+    HttpClientError(StatusCode, ErrorResponse),
+    HttpServerError(StatusCode),
 }
 
 impl Client {
@@ -140,7 +149,7 @@ impl Client {
     }
 
     pub async fn get_item(&self, gfy_id: &str) -> Result<Item> {
-        let url = format!(
+        let req_url = format!(
             "https://{domain}/v{version}/gfycats/{gfyid}",
             domain = self.api_domain,
             version = self.api_version,
@@ -148,23 +157,59 @@ impl Client {
         );
         let res = self
             .http_client
-            .get(url.as_str())
+            .get(req_url.as_str())
             .send()
             .await
             .map_err(Error::Connect)?;
         let res_status = res.status();
-        if !res_status.is_success() {
-            return Err(Error::HttpNotOk(res_status));
+
+        // 1xx
+        if res_status.is_informational() {
+            unimplemented!("{:?}", res_status);
         }
-        res.json::<ItemWrapper>()
-            .await
-            .map(|res_obj| res_obj.gfy_item)
-            .map_err(Error::BadResponse)
+        // 2xx
+        if res_status.is_success() {
+            return Self::parse_response::<ItemWrapper>(res)
+                .await
+                .map(|res_obj| res_obj.gfy_item);
+        }
+        // 3xx
+        if res_status.is_redirection() {
+            unimplemented!("{:?}", res_status);
+        }
+        // 4xx
+        if res_status.is_client_error() {
+            return Err(Self::parse_response::<ErrorResponse>(res)
+                .await
+                .map(|res_err| Error::HttpClientError(res_status, res_err))?);
+        }
+        // 5xx
+        if res_status.is_server_error() {
+            return Err(Error::HttpServerError(res_status));
+        }
+        panic!("Invalid HTTP status code: {:?}", res_status);
+    }
+
+    async fn parse_response<T>(res: reqwest::Response) -> Result<T>
+    where
+        T: DeserializeOwned,
+    {
+        let content_type = res
+            .headers()
+            .get(CONTENT_TYPE)
+            .map(|hdr| hdr.to_str().ok())
+            .flatten()
+            .map(String::from);
+        let parsed_res = res.json::<T>().await;
+        match parsed_res {
+            Ok(res_obj) => Ok(res_obj),
+            Err(err) => Err(Error::UnparsableResponseBody(err, content_type)),
+        }
     }
 }
 
 impl Serialize for Nsfw {
-    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -238,8 +283,9 @@ impl std::error::Error for Error {
         Some(match self {
             Error::Initialization(err) => err,
             Error::Connect(err) => err,
-            Error::HttpNotOk(_) => return None,
-            Error::BadResponse(err) => err,
+            Error::UnparsableResponseBody(err, _) => err,
+            Error::HttpClientError(_, _) => return None,
+            Error::HttpServerError(_) => return None,
         })
     }
 }
@@ -255,9 +301,10 @@ mod tests {
     use super::{Client, Error, Item, ItemContent, Nsfw, Published, User};
     use chrono::{TimeZone, Utc};
     use maplit::hashmap;
+    use reqwest::StatusCode;
 
     #[tokio::test]
-    async fn my_test() -> std::result::Result<(), Error> {
+    async fn get_item() -> std::result::Result<(), Error> {
         let to_string_vec = |vec: &[&str]| {
             vec.iter()
                 .map(|str| String::from(*str))
@@ -366,5 +413,19 @@ mod tests {
         assert_eq!(item, expected_item);
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_gfycat_does_not_exist() -> std::result::Result<(), Error> {
+        let item = Client::default()?.get_item("not_a_valid_gfyid").await;
+        match item {
+            Err(Error::HttpClientError(status_code, error_obj)) => {
+                assert_eq!(status_code, StatusCode::NOT_FOUND);
+                assert_eq!(error_obj.error_message, "not_a_valid_gfyid does not exist.");
+                Ok(())
+            }
+            Err(bad_error) => panic!("Expected an Err but it was the wrong type: {:?}", bad_error),
+            Ok(success_obj) => panic!("Expected an Err but was Ok: {:?}", success_obj),
+        }
     }
 }
