@@ -1,30 +1,30 @@
-use crate::dto::ErrorResponse;
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
+
 use reqwest::StatusCode;
-use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum Error {
-    Initialization(reqwest::Error),
-    Connect(reqwest::Error),
-    UnparsableResponseBody(reqwest::Error, Option<String>),
-    HttpClientError(StatusCode, ErrorResponse),
-    HttpServerError(StatusCode),
+    Init(reqwest::Error),
+    Network(reqwest::Error),
+    Parse(reqwest::Error),
+    Status(StatusCode),
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(match self {
-            Error::Initialization(err) => err,
-            Error::Connect(err) => err,
-            Error::UnparsableResponseBody(err, _) => err,
-            Error::HttpClientError(_, _) => return None,
-            Error::HttpServerError(_) => return None,
-        })
+        use Error::*;
+        match self {
+            Init(source) => Some(source),
+            Network(source) => Some(source),
+            Parse(source) => Some(source),
+            Status(_) => None,
+        }
     }
 }
 
 impl Display for Error {
-    fn fmt(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        write!(formatter, "{:?}", self)
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self, f)
     }
 }
